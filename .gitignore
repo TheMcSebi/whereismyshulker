@@ -1,0 +1,6 @@
+run/**
+build/**
+.gradle/**
+.idea/**
+builds_dir.lnk
+.vscode/**
