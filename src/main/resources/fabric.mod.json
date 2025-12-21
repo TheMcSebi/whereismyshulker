@@ -5,7 +5,11 @@
   "name": "WhereIsMyShulker",
   "description": "Tracks the location of shulker boxes that are currently placed in the world.",
   "authors": ["TheMcSebi"],
-  "contact": {},
+  "contact": {
+    "sources": "https://github.com/TheMcSebi/whereismyshulker",
+    "homepage": "https://modrinth.com/mod/where-is-my-shulker",
+    "issues": "https://github.com/TheMcSebi/whereismyshulker/issues"
+  },
   "license": "GNU General Public License, Version 3",
   "icon": "assets/whereismyshulker/icon.png",
   "environment": "client",
