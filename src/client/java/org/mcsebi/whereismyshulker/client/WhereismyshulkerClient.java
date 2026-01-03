@@ -1,6 +1,5 @@
 package org.mcsebi.whereismyshulker.client;
 
-import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
@@ -14,9 +13,9 @@ import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
-import net.minecraft.world.dimension.DimensionType;
 
+import java.net.URI;
+import java.util.HashMap;
 import java.util.List;
 
 public class WhereismyshulkerClient implements ClientModInitializer {
@@ -40,20 +39,53 @@ public class WhereismyshulkerClient implements ClientModInitializer {
             ShulkerBoxTracker.getInstance().onWorldUnload();
         });
 
-        // Register the /shulker command with pagination
+        // Register the /shulker command and its subcommands
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
-            dispatcher.register(ClientCommandManager.literal("shulker")
-                .executes(context -> {
-                    // Show page 1 by default
-                    return showShulkerList(context.getSource(), "1");
-                })
-                .then(ClientCommandManager.argument("page", StringArgumentType.string())
-                    .executes(context -> {
-                        String arg = StringArgumentType.getString(context, "page");
-                        return showShulkerList(context.getSource(), arg);
-                    })
+                dispatcher.register(ClientCommandManager.literal("shulker")
+                        // /shulker  (default page = 1)
+                        .executes(context -> showShulkerList(context.getSource(), "1"))
+
+                        // /shulker <page>
+                        .then(ClientCommandManager.argument("page", StringArgumentType.string())
+                                .executes(context -> {
+                                    String page = StringArgumentType.getString(context, "page");
+                                    return showShulkerList(context.getSource(), page);
+                                })
+                        )
+
+                        // /shulker clear
+                        .then(ClientCommandManager.literal("clear")
+                                .executes(context -> clearShulkerList(context.getSource(), false))
+                        )
+
+                        // /shulker clearAll
+                        .then(ClientCommandManager.literal("clear all")
+                                .executes(context -> clearShulkerList(context.getSource(), true))
+                        )
+
+                        // /shulker config [arg1 [arg2]]
+                        .then(ClientCommandManager.literal("config")
+                                // /shulker config
+                                .executes(context -> printProperties(context.getSource()))
+
+                                // /shulker config <arg1>
+                                .then(ClientCommandManager.argument("arg1", StringArgumentType.string())
+                                        .executes(context -> {
+                                            String arg1 = StringArgumentType.getString(context, "arg1");
+                                            return printProperty(context.getSource(), arg1);
+                                        })
+
+                                        // /shulker config <arg1> <arg2>
+                                        .then(ClientCommandManager.argument("arg2", StringArgumentType.string())
+                                                .executes(context -> {
+                                                    String arg1 = StringArgumentType.getString(context, "arg1");
+                                                    String arg2 = StringArgumentType.getString(context, "arg2");
+                                                    return setProperty(context.getSource(), arg1, arg2);
+                                                })
+                                        )
+                                )
+                        )
                 )
-            )
         );
     }
 
@@ -78,16 +110,7 @@ public class WhereismyshulkerClient implements ClientModInitializer {
         try {
             page = Integer.parseInt(arg);
         } catch (NumberFormatException e) {
-            if(arg.toLowerCase().startsWith("reset") || arg.toLowerCase().startsWith("prune") || arg.toLowerCase().startsWith("clear")) {
-                if(arg.toLowerCase().endsWith("all")) {
-                    tracker.resetShulkerBoxes(true);
-                    source.sendFeedback(Text.literal("All shulker boxes have been reset.").formatted(Formatting.GREEN));
-                } else {
-                    tracker.resetShulkerBoxes(false);
-                    source.sendFeedback(Text.literal("Default shulker boxes have been reset.").formatted(Formatting.GREEN));
-                }
-                return 1;
-            }
+
             source.sendError(Text.literal("Invalid page number! Please enter a valid integer or type 'reset' to reset your shulker history."));
             return 0;
         }
@@ -155,7 +178,10 @@ public class WhereismyshulkerClient implements ClientModInitializer {
                     .append(createClickableCoords(data))
                     .append(Text.literal(") ").formatted(Formatting.GRAY))
                     .append(dimensionInfo)
-                    .append(distanceInfo);
+                    .append(distanceInfo)
+                    .append(Text.literal(" [").formatted(Formatting.DARK_GRAY))
+                    .append(createBlueMapLink(data))
+                    .append(Text.literal("]").formatted(Formatting.DARK_GRAY));
 
 
             source.sendFeedback(message);
@@ -213,6 +239,31 @@ public class WhereismyshulkerClient implements ClientModInitializer {
                 .styled(style -> style
                         .withClickEvent(new ClickEvent.SuggestCommand(cmd))
                         .withHoverEvent(new HoverEvent.ShowText(Text.literal("Click to teleport")))
+                );
+    }
+    /**
+     * Create clickable BlueMap Link.
+     *  url: <baseUrl>/#world:<x>:<y>:<z>:5:1.04:1.08:0:0:perspective
+     * @param data Shulker box data
+     * @return Clickable text component with coordinates
+     */
+    private MutableText createBlueMapLink(ShulkerBoxData data) {
+        BlockPos pos = data.getPosition();
+        ShulkerBoxTracker tracker = ShulkerBoxTracker.getInstance();
+        String baseUrl = tracker.getProperty("blueMapBaseUrl", "http://localhost:8100");
+
+        String url = String.format("%s/#%s:%d:%d:%d:5:1.04:1.08:0:0:perspective",
+                baseUrl,
+                getBlueMapWorldName(data.getDimension()),
+                pos.getX(), pos.getY()+2, pos.getZ()); // y-pos +2 to center on shulker box, bluemap want's it this way
+
+        URI uri = URI.create(url);
+
+        return Text.literal("BlueMap")
+                .formatted(Formatting.BLUE)
+                .styled(style -> style
+                        .withClickEvent(new ClickEvent.OpenUrl(uri))
+                        .withHoverEvent(new HoverEvent.ShowText(Text.literal("Show on BlueMap")))
                 );
     }
 
@@ -297,5 +348,103 @@ public class WhereismyshulkerClient implements ClientModInitializer {
             return "End";
         }
         return dimension;
+    }
+
+    /**
+     * Get BlueMap world name based on dimension.
+     *
+     * @param dimension Dimension identifier
+     * @return BlueMap world name
+     */
+    private String getBlueMapWorldName(String dimension) {
+        if (dimension.contains("overworld")) {
+            return "world";
+        } else if (dimension.contains("the_nether")) {
+            return "world_nether";
+        } else if (dimension.contains("the_end")) {
+            return "world_the_end";
+        }
+        return "world";
+    }
+
+    /**
+     * Clear shulker list - wrapper for /shulker clearAll command.
+     *
+     * @param source Command sender source
+     * @param clearAll If true, clears all shulker boxes. If false, clears default shulker boxes.
+     * @return Command result status
+     */
+    private int clearShulkerList(FabricClientCommandSource source, boolean clearAll) {
+        ShulkerBoxTracker tracker = ShulkerBoxTracker.getInstance();
+        tracker.resetShulkerBoxes(clearAll);
+
+        if (clearAll) {
+            source.sendFeedback(Text.literal("All shulker boxes have been reset.").formatted(Formatting.GREEN));
+        } else {
+            source.sendFeedback(Text.literal("Default shulker boxes have been reset.").formatted(Formatting.GREEN));
+        }
+        return 1;
+    }
+
+    /**
+     * Print all properties - handler for /shulker config.
+     *
+     * @param source Command sender source
+     * @return Command result status
+     */
+    private int printProperties(FabricClientCommandSource source) {
+        ShulkerBoxTracker tracker = ShulkerBoxTracker.getInstance();
+        HashMap<String, String> props = tracker.getProperties();
+
+        if (props == null || props.isEmpty()) {
+            source.sendFeedback(Text.literal("No configuration properties found.").formatted(Formatting.YELLOW));
+            return 1;
+        }
+
+        source.sendFeedback(Text.literal("=== Configuration Properties ===").formatted(Formatting.GOLD, Formatting.BOLD));
+        for (String key : props.keySet()) {
+            source.sendFeedback(Text.literal(key + " = " + props.get(key)).formatted(Formatting.WHITE));
+        }
+        return 1;
+    }
+
+    /**
+     * Print a specific property - handler for /shulker config <arg1>.
+     *
+     * @param source Command sender source
+     * @param key Property key
+     * @return Command result status
+     */
+    private int printProperty(FabricClientCommandSource source, String key) {
+        ShulkerBoxTracker tracker = ShulkerBoxTracker.getInstance();
+        String value = tracker.getProperty(key, null);
+
+        if (value == null) {
+            source.sendError(Text.literal("Property '" + key + "' not found."));
+            return 0;
+        }
+
+        source.sendFeedback(Text.literal(key + " = " + value).formatted(Formatting.WHITE));
+        return 1;
+    }
+
+    /**
+     * Set a property - handler for /shulker config <arg1> <arg2>.
+     *
+     * @param source Command sender source
+     * @param key Property key
+     * @param value Property value
+     * @return Command result status
+     */
+    private int setProperty(FabricClientCommandSource source, String key, String value) {
+        ShulkerBoxTracker tracker = ShulkerBoxTracker.getInstance();
+
+        if (tracker.setProperty(key, value)) {
+            source.sendFeedback(Text.literal("Property '" + key + "' set to '" + value + "'.").formatted(Formatting.GREEN));
+            return 1;
+        } else {
+            source.sendError(Text.literal("Failed to set property '" + key + "'."));
+            return 0;
+        }
     }
 }

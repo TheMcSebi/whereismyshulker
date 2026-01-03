@@ -5,7 +5,6 @@ import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.world.ClientWorld;
-import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.minecraft.util.WorldSavePath;
@@ -16,12 +15,16 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 
 public class ShulkerBoxTracker {
     private static ShulkerBoxTracker instance;
     private final List<ShulkerBoxData> shulkerBoxes = new ArrayList<>();
     private Path csvFilePath;
+    private Path configFilePath;
+    private HashMap<String, String> properties;
+    private String currentServerIP = "localhost";
 
     private ShulkerBoxTracker() {
     }
@@ -40,12 +43,19 @@ public class ShulkerBoxTracker {
         }
 
         csvFilePath = getCsvPath(client);
+        configFilePath = getPropertiesPath(client);
         loadFromCsv();
+        loadProperties();
+        String baseUrl = "http://" + currentServerIP + ":8100";
+        setProperty("blueMapBaseUrl", getProperty("blueMapBaseUrl", baseUrl));
     }
     
     public void onWorldUnload() {
         shulkerBoxes.clear();
         csvFilePath = null;
+        configFilePath = null;
+        properties = null;
+        currentServerIP = "localhost";
     }
 
     /**
@@ -54,13 +64,15 @@ public class ShulkerBoxTracker {
      * @param client Minecraft client instance
      * @return Path to the CSV file
      */
-    private Path getCsvPath(MinecraftClient client) {
+    private Path getDataFolderPath(MinecraftClient client) {
         ClientPlayNetworkHandler networkHandler = client.getNetworkHandler();
         String serverAddress = client.getCurrentServerEntry() != null ?
                 client.getCurrentServerEntry().address : "unknown";
 
         if (!serverAddress.equals("unknown")) {
             // Multiplayer - store in .minecraft/.whereismyshulker/ip_port/
+
+            currentServerIP = serverAddress.split(":")[0];
 
             // Replace colons and other invalid characters
             serverAddress = serverAddress.replace(":", "_").replaceAll("[^a-zA-Z0-9._-]", "_");
@@ -74,7 +86,7 @@ public class ShulkerBoxTracker {
                 e.printStackTrace();
             }
 
-            return whereismyshulkerDir.resolve("shulker_boxes.csv");
+            return whereismyshulkerDir;
         } else {
             // Singleplayer - store in world/data/
             ClientWorld world = client.world;
@@ -92,7 +104,7 @@ public class ShulkerBoxTracker {
                     e.printStackTrace();
                 }
 
-                return dataDir.resolve("shulker_boxes.csv");
+                return dataDir;
             }
         }
 
@@ -104,7 +116,65 @@ public class ShulkerBoxTracker {
         } catch (IOException e) {
             e.printStackTrace();
         }
-        return whereismyshulkerDir.resolve("shulker_boxes.csv");
+        return whereismyshulkerDir;
+    }
+
+    private Path getCsvPath(MinecraftClient client) {
+        return getDataFolderPath(client).resolve("shulker_boxes.csv");
+    }
+
+    private Path getPropertiesPath(MinecraftClient client) {
+        return getDataFolderPath(client).resolve("shulker_config.properties");
+    }
+
+    private void loadProperties() {
+        properties = new HashMap<>();
+        if (configFilePath != null && Files.exists(configFilePath)) {
+            try (BufferedReader reader = Files.newBufferedReader(configFilePath)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String[] parts = line.split("=", 2);
+                    if (parts.length == 2) {
+                        properties.put(parts[0].trim(), parts[1].trim());
+                    }
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    protected String getProperty(String key, String defaultValue) {
+        if (properties != null && properties.containsKey(key)) {
+            return properties.get(key);
+        }
+        return defaultValue;
+    }
+
+    protected HashMap<String, String> getProperties() {
+        return properties;
+    }
+
+    protected boolean setProperty(String key, String value) {
+        if (properties == null) {
+            return false;
+        }
+        properties.put(key, value);
+
+        // Save to file
+        if (configFilePath != null) {
+            try (BufferedWriter writer = Files.newBufferedWriter(configFilePath,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                for (String k : properties.keySet()) {
+                    writer.write(k + "=" + properties.get(k));
+                    writer.newLine();
+                }
+                return true;
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        return false;
     }
 
     private void loadFromCsv() {
