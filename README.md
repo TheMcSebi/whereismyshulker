@@ -4,6 +4,8 @@ This mod keeps track of every shulker box you place or break in a world so you n
 
 It adds a simple command to interact with the tracked data.
 
+[Download on Modrinth](https://modrinth.com/mod/where-is-my-shulker)
+
 ---
 
 ## ✨ Features
